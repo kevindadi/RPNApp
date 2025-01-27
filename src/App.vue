@@ -6,8 +6,23 @@ import { invoke } from '@tauri-apps/api/tauri'
 
 const sourceCode = ref('')
 const irCode = ref('')
-const graphUrl = ref('')
+const graphContent = ref('')
 const info = ref('')
+
+// 添加标题和介绍
+const pageInfo = {
+  title: "Rust并发程序分析工具",
+  description: "这是一个基于 Petri 网的 Rust 并发程序分析工具，可以检测死锁、原子性违反和数据竞争等并发问题。"
+}
+
+// 添加检测模式配置
+const detectionModes = [
+  { id: 'deadlock', name: '死锁检测', flag: '-m deadlock' },
+  { id: 'atomicity', name: '原子性违反检测', flag: '-m atomic' },
+  { id: 'race', name: '数据竞争检测', flag: '-m datarace' }
+]
+const selectedMode = ref('deadlock')
+
 
 // 面板状态管理
 const panels = reactive({
@@ -112,12 +127,37 @@ async function generateMir(code: string) {
   }
 }
 
+async function processSourceCode(code: string) {
+  try {
+    await invoke('save_source_code', { code })
+  
+    const mode = detectionModes.find(m => m.id === selectedMode.value)?.flag || '-m deadlock'
+    const result = await invoke('run_pn_analysis', { mode })
+  
+    if (typeof result === 'object' && result) {
+      const { graphContent: svg, output, error } = result as { 
+        graphContent: string, 
+        output: string, 
+        error: string 
+      }
+      graphContent.value = svg 
+      info.value = `输出:\n${output}\n\n错误:\n${error}`
+    }
+  } catch (error) {
+    console.error('处理失败:', error)
+    info.value = `Error: ${error}`
+  }
+}
+
 // 修改 sourceCode 的 watch
 watch(sourceCode, async (newCode) => {
   if (newCode.trim()) {
     await generateMir(newCode)
+    await processSourceCode(newCode)
   } else {
     irCode.value = ''
+    graphContent.value = ''
+    info.value = ''
   }
 })
 
@@ -150,28 +190,45 @@ function handleExampleChange(event: Event) {
 
 <template>
   <div class="container">
+    <!-- 添加标题和介绍部分 -->
+    <div class="header">
+      <h1>{{ pageInfo.title }}</h1>
+      <p class="description">{{ pageInfo.description }}</p>
+      <div class="controls">
+        <div class="mode-selector">
+          <label>检测模式：</label>
+          <select v-model="selectedMode">
+            <option 
+              v-for="mode in detectionModes" 
+              :key="mode.id" 
+              :value="mode.id"
+            >
+              {{ mode.name }}
+            </option>
+          </select>
+        </div>
+        <select 
+          v-model="selectedExample"
+          @change="handleExampleChange"
+          class="example-select"
+        >
+          <option value="">选择示例...</option>
+          <option 
+            v-for="example in examples" 
+            :key="example.file" 
+            :value="example.file"
+          >
+            {{ example.name }}
+          </option>
+        </select>
+      </div>
+    </div>
+
     <Splitpanes class="default-theme" @resize="onResize">
       <Pane v-if="panels.sourceCode.visible" :size="panels.sourceCode.size">
         <div class="panel source-code">
           <div class="panel-header">
             <h3>RustSourceCode</h3>
-            <div class="panel-controls">
-              <select 
-                v-model="selectedExample"
-                @change="handleExampleChange"
-                class="example-select"
-              >
-                <option value="">Select Example...</option>
-                <option 
-                  v-for="example in examples" 
-                  :key="example.file" 
-                  :value="example.file"
-                >
-                  {{ example.name }}
-                </option>
-              </select>
-              <button @click="togglePanel('sourceCode')" class="close-btn">×</button>
-            </div>
           </div>
           <textarea
             v-model="sourceCode"
@@ -198,16 +255,8 @@ function handleExampleChange(event: Event) {
             <button @click="togglePanel('graph')" class="close-btn">×</button>
           </div>
           <div class="graph-container">
-            <img
-              ref="graphImage"
-              :src="graphUrl"
-              @wheel="handleZoom"
-              @mousedown="startDrag"
-              @mousemove="onDrag"
-              @mouseup="stopDrag"
-              @mouseleave="stopDrag"
-              :style="imageStyle"
-            />
+            <!-- SVG will be rendered here -->
+            <img :src="graphContent" alt="PetriNet Graph" />
           </div>
         </div>
       </Pane>
@@ -237,6 +286,53 @@ function handleExampleChange(event: Event) {
 </template>
 
 <style scoped>
+
+/* 添加新的样式 */
+.header {
+  padding: 16px;
+  background: #f8f9fa;
+  border-bottom: 1px solid #ddd;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 24px;
+  color: #333;
+}
+
+.description {
+  margin: 8px 0;
+  color: #666;
+  font-size: 14px;
+}
+
+.controls {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  margin-top: 12px;
+}
+.mode-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mode-selector label {
+  font-size: 14px;
+  color: #555;
+}
+
+.mode-selector select,
+.example-select {
+  padding: 4px 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: white;
+  font-size: 14px;
+  min-width: 120px;
+}
+
 .container {
   height: 100vh;
   display: flex;
@@ -244,7 +340,7 @@ function handleExampleChange(event: Event) {
 }
 
 .splitpanes {
-  height: calc(100% - 40px);
+  height: calc(100% - 40px - 120px);
 }
 
 .panel {
@@ -290,23 +386,6 @@ function handleExampleChange(event: Event) {
   white-space: pre-wrap;
 }
 
-.graph-container {
-  flex: 1;
-  overflow: hidden;
-  position: relative;
-  background: #fff;
-}
-
-.graph-container img {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform-origin: center center;
-}
-
 .info-content {
   flex: 1;
   padding: 8px;
@@ -341,5 +420,20 @@ function handleExampleChange(event: Event) {
   border-radius: 4px;
   background: white;
   font-size: 14px;
+}
+
+.graph-container {
+  flex: 1;
+  overflow: auto;
+  background: white;
+  padding: 16px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.graph-container :deep(svg) {
+  max-width: 100%;
+  max-height: 100%;
 }
 </style>

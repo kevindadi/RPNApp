@@ -61,9 +61,59 @@ async fn generate_mir(source_code: String) -> Result<String, String> {
     }
 }
 
+// Only for example test
+#[tauri::command]
+async fn save_source_code(code: String) -> Result<(), String> {
+    let tmp_dir = "/tmp/main";
+    fs::create_dir_all(tmp_dir).map_err(|e| e.to_string())?;
+    fs::write(format!("{}/main.rs", tmp_dir), code).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn run_pn_analysis(mode: String) -> Result<serde_json::Value, String> {
+    let tmp_dir = "/tmp/main";
+    let pn_flags = format!("{} -p main --viz-petrinet", mode);
+    let dyld_path =
+        "/Users/kevin/.rustup/toolchains/nightly-2024-12-11-aarch64-apple-darwin/lib:$DYLD_LIBRARY_PATH".to_string();
+
+    
+    // 执行 PN 分析命令
+    let output = Command::new("/Users/kevin/.cargo/bin/pn")
+        .env("PN_FLAGS", pn_flags)
+        .env("DYLD_LIBRARY_PATH", &dyld_path)
+        .arg("/tmp/main/main.rs")
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    // 将 dot 转换为 png
+    Command::new("dot")
+        .args(["-Tsvg", "-o", "/tmp/main/graph.svg"])
+        .arg("/tmp/main/graph.dot")
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    let svg_content = fs::read_to_string("/tmp/main/graph.svg")
+        .map_err(|e| e.to_string())?;
+    // 构建返回结果
+    let result = serde_json::json!({
+        "graphContent": svg_content,
+        "output": String::from_utf8_lossy(&output.stdout).to_string(),
+        "error": String::from_utf8_lossy(&output.stderr).to_string()
+    });
+
+    Ok(result)
+}
+
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![greet, read_example, generate_mir])
+        .invoke_handler(tauri::generate_handler![
+            greet,
+            read_example,
+            generate_mir,
+            save_source_code,
+            run_pn_analysis
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
