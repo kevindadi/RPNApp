@@ -9,6 +9,12 @@ const irCode = ref('')
 const graphContent = ref('')
 const info = ref('')
 
+// 添加按钮状态控制
+const isProcessing = reactive({
+  mir: false,
+  petri: false
+})
+
 // 添加标题和介绍
 const pageInfo = {
   title: "Rust并发程序分析工具",
@@ -115,98 +121,100 @@ function onResize() {
   // 处理面板大小调整后的逻辑
 }
 
-async function generateMir(code: string) {
+// 分离 MIR 生成函数
+async function handleGenerateMir() {
+  if (!sourceCode.value.trim()) {
+    info.value = "请先输入源代码或选择示例"
+    return
+  }
+  
   try {
-    console.log('Generating MIR for:', code.substring(0, 100) + '...') 
-    const mir = await invoke('generate_mir', { sourceCode: code })
-    console.log('MIR generation result:', mir ? 'success' : 'empty')
-    irCode.value = mir as string
+    isProcessing.mir = true
+    irCode.value = await invoke('generate_mir', { sourceCode: sourceCode.value })
   } catch (error) {
     console.error('MIR 生成失败:', error)
     irCode.value = `Error: ${error}`
+  } finally {
+    isProcessing.mir = false
   }
 }
 
-async function processSourceCode(code: string) {
+// 分离 Petri 网分析函数
+async function handlePetriAnalysis() {
+  if (!sourceCode.value.trim()) {
+    info.value = "请先输入源代码或选择示例"
+    return
+  }
+  
   try {
-    await invoke('save_source_code', { code })
-  
-    const mode = detectionModes.find(m => m.id === selectedMode.value)?.flag || '-m deadlock'
-    const result = await invoke('run_pn_analysis', { mode })
-  
+    isProcessing.petri = true
+    
+    const mode = detectionModes.find(m => m.id === selectedMode.value)
+    const result = await invoke('run_pn_analysis', { sourceCode: sourceCode.value, mode: mode?.flag || '-m deadlock' })
+    
     if (typeof result === 'object' && result) {
       const { graphContent: svg, output, error } = result as { 
         graphContent: string, 
         output: string, 
         error: string 
       }
-      graphContent.value = svg 
-      info.value = `输出:\n${output}\n\n错误:\n${error}`
+      graphContent.value = svg
+      
+      // 格式化输出内容
+      const analysisMode = mode?.name || '死锁检测'
+      const outputLines = output.split('\n').filter(line => line.trim())
+      
+      info.value = `分析模式: ${analysisMode}\n` +
+        '----------------------------------------\n' +
+        '分析结果:\n' +
+        outputLines
+          .map(line => line.trim())
+          .filter(line => !line.startsWith('==='))  // 过滤掉分隔符行
+          .join('\n') +
+        '\n----------------------------------------\n'
     }
   } catch (error) {
-    console.error('处理失败:', error)
-    info.value = `Error: ${error}`
+    console.error('Petri 网分析失败:', error)
+    info.value = `错误: ${error}`
+  } finally {
+    isProcessing.petri = false
   }
 }
 
-// 修改 sourceCode 的 watch
-watch(sourceCode, async (newCode) => {
-  if (newCode.trim()) {
-    await generateMir(newCode)
-    await processSourceCode(newCode)
-  } else {
-    irCode.value = ''
-    graphContent.value = ''
-    info.value = ''
-  }
-})
-
+// 修改 loadExample 函数，只加载源代码
 async function loadExample(filename: string) {
   try {
     console.log('Loading example file:', filename)
     const code = await invoke('read_example', { filename })
-    console.log('Received code:', code)  // 打印实际收到的内容
     if (typeof code === 'string') {
       sourceCode.value = code
-      await generateMir(code)
     } else {
       console.error('Unexpected response type:', typeof code)
     }
   } catch (error) {
     console.error('加载示例失败:', error)
-    sourceCode.value = `Error: ${error}`
+    info.value = `Error: ${error}`
   }
 }
 
-function handleExampleChange(event: Event) {
+// 修改 handleExampleChange 函数
+async function handleExampleChange(event: Event) {
   const target = event.target as HTMLSelectElement
   if (target.value) {
     console.log('Selected example:', target.value)
-    sourceCode.value = '' 
-    loadExample(target.value) 
+    // 直接加载示例，不要清空 sourceCode
+    await loadExample(target.value)
   }
 }
 </script>
 
 <template>
   <div class="container">
-    <!-- 添加标题和介绍部分 -->
     <div class="header">
       <h1>{{ pageInfo.title }}</h1>
       <p class="description">{{ pageInfo.description }}</p>
       <div class="controls">
-        <div class="mode-selector">
-          <label>检测模式：</label>
-          <select v-model="selectedMode">
-            <option 
-              v-for="mode in detectionModes" 
-              :key="mode.id" 
-              :value="mode.id"
-            >
-              {{ mode.name }}
-            </option>
-          </select>
-        </div>
+        <!-- 示例选择 -->
         <select 
           v-model="selectedExample"
           @change="handleExampleChange"
@@ -221,6 +229,38 @@ function handleExampleChange(event: Event) {
             {{ example.name }}
           </option>
         </select>
+        
+        <!-- 分析模式选择 -->
+        <div class="mode-selector">
+          <label>检测模式：</label>
+          <select v-model="selectedMode">
+            <option 
+              v-for="mode in detectionModes" 
+              :key="mode.id" 
+              :value="mode.id"
+            >
+              {{ mode.name }}
+            </option>
+          </select>
+        </div>
+        
+        <!-- 添加操作按钮 -->
+        <div class="action-buttons">
+          <button 
+            @click="handleGenerateMir" 
+            :disabled="isProcessing.mir"
+            class="action-btn"
+          >
+            {{ isProcessing.mir ? '生成中...' : '生成 MIR' }}
+          </button>
+          <button 
+            @click="handlePetriAnalysis" 
+            :disabled="isProcessing.petri"
+            class="action-btn"
+          >
+            {{ isProcessing.petri ? '分析中...' : 'Petri 网分析' }}
+          </button>
+        </div>
       </div>
     </div>
 
@@ -255,8 +295,8 @@ function handleExampleChange(event: Event) {
             <button @click="togglePanel('graph')" class="close-btn">×</button>
           </div>
           <div class="graph-container">
-            <!-- SVG will be rendered here -->
-            <img :src="graphContent" alt="PetriNet Graph" />
+            <!-- 使用 v-html 直接插入 SVG 内容 -->
+            <div v-html="graphContent" class="svg-wrapper"></div>
           </div>
         </div>
       </Pane>
@@ -311,6 +351,7 @@ function handleExampleChange(event: Event) {
   gap: 16px;
   align-items: center;
   margin-top: 12px;
+  flex-wrap: wrap;
 }
 .mode-selector {
   display: flex;
@@ -432,8 +473,41 @@ function handleExampleChange(event: Event) {
   align-items: center;
 }
 
-.graph-container :deep(svg) {
+.svg-wrapper {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.svg-wrapper :deep(svg) {
   max-width: 100%;
   max-height: 100%;
+}
+
+/* 添加新的按钮样式 */
+.action-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.action-btn {
+  padding: 6px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+  transition: all 0.3s;
+  min-width: 100px;
+}
+
+.action-btn:hover:not(:disabled) {
+  background: #f0f0f0;
+}
+
+.action-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 </style>
