@@ -5,6 +5,15 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::env;
 
+use tonic::transport::Channel;
+
+pub mod rustmir {
+    include!(concat!(env!("OUT_DIR"), "/rustmir.rs"));
+}
+
+use rustmir::rust_mir_service_client::RustMirServiceClient;
+use rustmir::RustSourceRequest;
+
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
@@ -88,6 +97,30 @@ async fn generate_mir(source_code: String) -> Result<String, String> {
         Ok(String::from_utf8_lossy(&output.stderr).into_owned())
     }
 }
+
+// #[tauri::command]
+// async fn generate_mir(source_code: String) -> Result<String, String> {
+//     let endpoint = "http://106.14.126.126:50051";
+//     let channel = Channel::from_shared(endpoint.to_string())
+//         .map_err(|e| format!("无效的 endpoint URL: {}", e))?
+//         .connect()
+//         .await
+//         .map_err(|e| format!("连接服务器失败: {}", e))?;
+
+//     let mut client = RustMirServiceClient::new(channel);
+
+//     let request = tonic::Request::new(RustSourceRequest {
+//         source_code,
+//     });
+
+//     let response = client
+//         .get_mir(request)
+//         .await
+//         .map_err(|e| format!("RPC 调用失败: {}", e))?;
+    
+//     let mir_response = response.into_inner();
+//     Ok(mir_response.content)
+// }
 
 // 获取用户临时目录的辅助函数
 fn get_temp_dir() -> Result<PathBuf, String> {

@@ -1,0 +1,19 @@
+syntax = "proto3";
+package rustmir;
+
+// 定义服务接口
+service RustMirService {
+  // 传入 Rust 源代码，获取 MIR
+  rpc GetMir (RustSourceRequest) returns (MirResponse);
+}
+
+// 请求消息
+message RustSourceRequest {
+  string source_code = 1;  // Rust 源代码内容
+}
+
+// 响应消息
+message MirResponse {
+  bool success = 1;        // 是否成功
+  string content = 2;      // MIR 输出或错误信息
+}
