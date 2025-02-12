@@ -2,11 +2,10 @@ syntax = "proto3";
 package rustmir;
 
 service RustMirService {
-    // 原来的方法
     rpc GetMir (RustSourceRequest) returns (MirResponse);
-    // 新增：列出目录下所有文件名
+    // 列出目录下所有文件名
     rpc ListFiles (ListFilesRequest) returns (ListFilesResponse);
-    // 新增：执行 pn 分析，返回 SVG 内容及其它信息
+    // 执行 pn 分析，返回 SVG 内容及其它信息
     rpc RunPnAnalysis (PnAnalysisRequest) returns (PnAnalysisResponse);
     rpc GetFileContent (FileContentRequest) returns (FileContentResponse);
 }
@@ -33,7 +32,7 @@ message ListFilesResponse {
 message PnAnalysisRequest {
     // 源代码内容
     string source_code = 1;
-    // 模式参数（例如 pn 命令中的选项）
+    // 模式参数（检测模式）
     string mode = 2;
 }
 

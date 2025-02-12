@@ -73,10 +73,8 @@ function onResize() {
   // 处理面板大小调整后的逻辑
 }
 
-// 获取示例文件列表
 const fetchFileList = async () => {
   try {
-    // 假设你的 RPC 客户端实例通过某种方式注入或导入
     const response = await invoke('list_files', {
       dirPath: '/home/kevin/KevinServer/examples' // 或其他你存放示例的目录路径
     })
@@ -93,7 +91,6 @@ onMounted(() => {
   fetchFileList()
 })
 
-// 分离 MIR 生成函数
 async function handleGenerateMir() {
   if (!sourceCode.value.trim()) {
     irCode.value = "请先输入源代码或选择示例"
@@ -111,7 +108,6 @@ async function handleGenerateMir() {
   }
 }
 
-// 分离 Petri 网分析函数
 async function handlePetriAnalysis() {
   if (!sourceCode.value.trim()) {
     graphContent.value = "请先输入源代码或选择示例"
@@ -152,7 +148,6 @@ async function handlePetriAnalysis() {
   }
 }
 
-// 修改 loadExample 函数，只加载源代码
 async function loadExample(filename: string) {
   try {
     console.log('Loading example file:', filename)
@@ -167,7 +162,6 @@ async function loadExample(filename: string) {
   }
 }
 
-// 修改 handleExampleChange 函数
 async function handleExampleChange(event: Event) {
   const target = event.target as HTMLSelectElement
   if (target.value) {
