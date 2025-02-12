@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, watch } from 'vue'
+import { ref, reactive, watch, onMounted } from 'vue'
 import { Splitpanes, Pane } from 'splitpanes'
 import 'splitpanes/dist/splitpanes.css'
 import { invoke } from '@tauri-apps/api/tauri'
@@ -7,7 +7,9 @@ import { invoke } from '@tauri-apps/api/tauri'
 const sourceCode = ref('')
 const irCode = ref('')
 const graphContent = ref('')
-const info = ref('')
+const result_info = ref('')
+const examples = ref<string[]>([])
+const selectedExample = ref('')
 
 // 添加按钮状态控制
 const isProcessing = reactive({
@@ -35,27 +37,8 @@ const panels = reactive({
   sourceCode: { visible: true, size: 25 },
   irCode: { visible: true, size: 25 },
   graph: { visible: true, size: 25 },
-  info: { visible: true, size: 25 }
+  result_info: { visible: true, size: 25 }
 })
-
-// 图片缩放和拖动相关状态
-const imageStyle = reactive({
-  transform: 'scale(1) translate(0px, 0px)',
-  cursor: 'grab'
-})
-const isDragging = ref(false)
-const dragStart = reactive({ x: 0, y: 0 })
-const currentTranslate = reactive({ x: 0, y: 0 })
-const scale = ref(1)
-
-// 添加示例配置
-const examples = [
-  { name: 'Example 1', file: 'example1.rs' },
-  { name: 'Example 2', file: 'example2.rs' },
-  { name: 'Example 3', file: 'example3.rs' }
-]
-
-const selectedExample = ref('')
 
 // 面板控制函数
 function togglePanel(panelKey: string) {
@@ -86,45 +69,34 @@ function getPanelName(key: string): string {
   return names[key as keyof typeof names]
 }
 
-// 图片缩放和拖动处理函数
-function handleZoom(e: WheelEvent) {
-  e.preventDefault()
-  const delta = e.deltaY > 0 ? 0.9 : 1.1
-  scale.value = Math.min(Math.max(0.1, scale.value * delta), 5)
-  updateImageTransform()
-}
-
-function startDrag(e: MouseEvent) {
-  isDragging.value = true
-  dragStart.x = e.clientX - currentTranslate.x
-  dragStart.y = e.clientY - currentTranslate.y
-  imageStyle.cursor = 'grabbing'
-}
-
-function onDrag(e: MouseEvent) {
-  if (!isDragging.value) return
-  currentTranslate.x = e.clientX - dragStart.x
-  currentTranslate.y = e.clientY - dragStart.y
-  updateImageTransform()
-}
-
-function stopDrag() {
-  isDragging.value = false
-  imageStyle.cursor = 'grab'
-}
-
-function updateImageTransform() {
-  imageStyle.transform = `scale(${scale.value}) translate(${currentTranslate.x}px, ${currentTranslate.y}px)`
-}
-
 function onResize() {
   // 处理面板大小调整后的逻辑
 }
 
+// 获取示例文件列表
+const fetchFileList = async () => {
+  try {
+    // 假设你的 RPC 客户端实例通过某种方式注入或导入
+    const response = await invoke('list_files', {
+      dirPath: '/home/kevin/KevinServer/examples' // 或其他你存放示例的目录路径
+    })
+    
+    console.log('Response:', response)
+
+    examples.value = response.filenames
+  } catch (error) {
+    console.error('获取文件列表失败:', error)
+  }
+}
+
+onMounted(() => {
+  fetchFileList()
+})
+
 // 分离 MIR 生成函数
 async function handleGenerateMir() {
   if (!sourceCode.value.trim()) {
-    info.value = "请先输入源代码或选择示例"
+    irCode.value = "请先输入源代码或选择示例"
     return
   }
   
@@ -142,7 +114,7 @@ async function handleGenerateMir() {
 // 分离 Petri 网分析函数
 async function handlePetriAnalysis() {
   if (!sourceCode.value.trim()) {
-    info.value = "请先输入源代码或选择示例"
+    graphContent.value = "请先输入源代码或选择示例"
     return
   }
   
@@ -150,8 +122,10 @@ async function handlePetriAnalysis() {
     isProcessing.petri = true
     
     const mode = detectionModes.find(m => m.id === selectedMode.value)
+    console.log('发送分析请求，模式:', mode?.flag)
     const result = await invoke('run_pn_analysis', { sourceCode: sourceCode.value, mode: mode?.flag || '-m deadlock' })
-    
+    console.log('收到分析结果:', result)
+
     if (typeof result === 'object' && result) {
       const { graphContent: svg, output, error } = result as { 
         graphContent: string, 
@@ -164,18 +138,15 @@ async function handlePetriAnalysis() {
       const analysisMode = mode?.name || '死锁检测'
       const outputLines = output.split('\n').filter(line => line.trim())
       
-      info.value = `分析模式: ${analysisMode}\n` +
+      result_info.value = `分析模式: ${analysisMode}\n` +
         '----------------------------------------\n' +
         '分析结果:\n' +
-        outputLines
-          .map(line => line.trim())
-          .filter(line => !line.startsWith('==='))  // 过滤掉分隔符行
-          .join('\n') +
+        outputLines +
         '\n----------------------------------------\n'
     }
   } catch (error) {
     console.error('Petri 网分析失败:', error)
-    info.value = `错误: ${error}`
+    result_info.value = `错误: ${error}`
   } finally {
     isProcessing.petri = false
   }
@@ -193,7 +164,6 @@ async function loadExample(filename: string) {
     }
   } catch (error) {
     console.error('加载示例失败:', error)
-    info.value = `Error: ${error}`
   }
 }
 
@@ -222,11 +192,11 @@ async function handleExampleChange(event: Event) {
         >
           <option value="">选择示例...</option>
           <option 
-            v-for="example in examples" 
-            :key="example.file" 
-            :value="example.file"
+            v-for="filename in examples" 
+            :key="filename" 
+            :value="filename"
           >
-            {{ example.name }}
+            {{ filename }}
           </option>
         </select>
         
@@ -301,13 +271,13 @@ async function handleExampleChange(event: Event) {
         </div>
       </Pane>
 
-      <Pane v-if="panels.info.visible" :size="panels.info.size">
+      <Pane v-if="panels.result_info.visible" :size="panels.result_info.size">
         <div class="panel info">
           <div class="panel-header">
             <h3>Detecion</h3>
             <button @click="togglePanel('info')" class="close-btn">×</button>
           </div>
-          <div class="info-content">{{ info }}</div>
+          <div class="info-content">{{ result_info }}</div>
         </div>
       </Pane>
     </Splitpanes>
