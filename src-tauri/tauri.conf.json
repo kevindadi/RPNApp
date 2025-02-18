@@ -23,6 +23,13 @@
         "scope": [
           "**"
         ]
+      },
+      "http": {
+        "all": true,
+        "request": true,
+        "scope": [
+          "http://106.14.126.126/*"
+        ]
       }
     },
     "bundle": {

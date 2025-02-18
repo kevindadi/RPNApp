@@ -2,7 +2,8 @@
 import { ref, reactive, watch, onMounted } from 'vue'
 import { Splitpanes, Pane } from 'splitpanes'
 import 'splitpanes/dist/splitpanes.css'
-import { invoke } from '@tauri-apps/api/tauri'
+
+import { getMir, listFiles, runPnAnalysis, getFileContent } from './api';
 
 const sourceCode = ref('')
 const irCode = ref('')
@@ -10,6 +11,8 @@ const graphContent = ref('')
 const result_info = ref('')
 const examples = ref<string[]>([])
 const selectedExample = ref('')
+
+const isTauri = window.__TAURI__ !== undefined
 
 // 添加按钮状态控制
 const isProcessing = reactive({
@@ -64,7 +67,7 @@ function getPanelName(key: string): string {
     sourceCode: '源代码',
     irCode: '中间代码',
     graph: '图形',
-    info: '信息'
+    result_info: '信息'
   }
   return names[key as keyof typeof names]
 }
@@ -73,9 +76,20 @@ function onResize() {
   // 处理面板大小调整后的逻辑
 }
 
+async function callApi(endpoint: string, data: any) {
+  if (isTauri) {
+    const { invoke } = await import('@tauri-apps/api/tauri')
+    return invoke(endpoint, data)
+  } 
+}
+
 const fetchFileList = async () => {
+  if (!isTauri) {
+    examples.value = (await listFiles('/home/kevin/KevinServer/examples')).filenames
+    return 
+  }
   try {
-    const response = await invoke('list_files', {
+    const response = await callApi('list_files', {
       dirPath: '/home/kevin/KevinServer/examples' // 或其他你存放示例的目录路径
     })
     
@@ -89,6 +103,13 @@ const fetchFileList = async () => {
 
 onMounted(() => {
   fetchFileList()
+
+  // 添加事件监听器，在页面可见性改变时检查是否需要刷新文件列表
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      fetchFileList()
+    }
+  })
 })
 
 async function handleGenerateMir() {
@@ -96,10 +117,17 @@ async function handleGenerateMir() {
     irCode.value = "请先输入源代码或选择示例"
     return
   }
+
+  if (!isTauri) {
+    isProcessing.mir = true
+    irCode.value = (await getMir(sourceCode.value)).content;
+    isProcessing.mir = false
+    return 
+  }
   
   try {
     isProcessing.mir = true
-    irCode.value = await invoke('generate_mir', { sourceCode: sourceCode.value })
+    irCode.value = await callApi('get_mir', { sourceCode: sourceCode.value })
   } catch (error) {
     console.error('MIR 生成失败:', error)
     irCode.value = `Error: ${error}`
@@ -113,22 +141,46 @@ async function handlePetriAnalysis() {
     graphContent.value = "请先输入源代码或选择示例"
     return
   }
+
+  if (!isTauri) {
+    const mode = detectionModes.find(m => m.id === selectedMode.value)
+    const pnResult = await runPnAnalysis(sourceCode.value, mode?.flag || '-m deadlock' );
+    if (pnResult) {
+      const { graph_content, output, error } = pnResult as { 
+        graph_content: string, 
+        output: string, 
+        error: string 
+      }
+      graphContent.value = graph_content
+      
+      // 格式化输出内容
+      const analysisMode = mode?.name || '死锁检测'
+      const outputLines = output.split('\n').filter(line => line.trim())
+      
+      result_info.value = `分析模式: ${analysisMode}\n` +
+        '----------------------------------------\n' +
+        '分析结果:\n' +
+        outputLines +
+        '\n----------------------------------------\n'
+    }
+    return 
+  }
   
   try {
     isProcessing.petri = true
     
     const mode = detectionModes.find(m => m.id === selectedMode.value)
     console.log('发送分析请求，模式:', mode?.flag)
-    const result = await invoke('run_pn_analysis', { sourceCode: sourceCode.value, mode: mode?.flag || '-m deadlock' })
+    const result = await callApi('run_pn_analysis', { sourceCode: sourceCode.value, mode: mode?.flag || '-m deadlock' })
     console.log('收到分析结果:', result)
 
-    if (typeof result === 'object' && result) {
-      const { graphContent: svg, output, error } = result as { 
-        graphContent: string, 
+    if (result) {
+      const { graph_content, output, error } = result as { 
+        graph_content: string, 
         output: string, 
         error: string 
       }
-      graphContent.value = svg
+      graphContent.value = graph_content
       
       // 格式化输出内容
       const analysisMode = mode?.name || '死锁检测'
@@ -151,7 +203,7 @@ async function handlePetriAnalysis() {
 async function loadExample(filename: string) {
   try {
     console.log('Loading example file:', filename)
-    const code = await invoke('read_example', { filename })
+    const code = await callApi('get_file_content', { filename })
     if (typeof code === 'string') {
       sourceCode.value = code
     } else {
